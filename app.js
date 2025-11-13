@@ -18,7 +18,8 @@ export async function main() {
         role: "system",
         content: `You are a smart personal assistant.
         You have access to following tools:
-        1. webSearch({query}: {query: string}) // Search the latest information and realtime data on the internet.`,
+        1. webSearch({query}: {query: string}) // Search the latest information and realtime data on the internet.
+        // current date and time is ${new Date().toLocaleString()}`,
       },
     ]
     while (true) {

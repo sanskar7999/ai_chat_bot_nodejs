@@ -44,7 +44,16 @@ export async function generate(userMessage, threadId) {
     content: userMessage,
   });
 
+  const MAX_RETRIES = 5;
+  let count = 0;
+
   while (true) {
+
+    if (count >= MAX_RETRIES) {
+      return "I Could not find the result, please try again later.";
+    }
+    count++;
+
     const completions = await groq.chat.completions.create({
       temperature: 0.7,
       model: "llama-3.3-70b-versatile",

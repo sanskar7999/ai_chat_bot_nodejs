@@ -2,7 +2,27 @@ import Groq from "groq-sdk";
 import 'dotenv/config';
 import { tavily } from "@tavily/core";
 import NodeCache from "node-cache";
-import { WebClient } from "@slack/web-api";
+import { SlackMcpClient } from "./mcpClient.js";
+
+// Initialize the MCP client
+const mcpClient = new SlackMcpClient();
+let mcpClientConnected = false;
+
+// Connect to the MCP server
+async function connectMcpClient() {
+  if (!mcpClientConnected) {
+    try {
+      await mcpClient.connect();
+      mcpClientConnected = true;
+      console.log('Connected to Slack MCP Server');
+    } catch (error) {
+      console.error('Failed to connect to Slack MCP Server:', error);
+    }
+  }
+}
+
+// Connect when the module is loaded
+connectMcpClient().catch(console.error);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
@@ -183,7 +203,7 @@ export async function generate(userMessage, threadId) {
             content: tool_result,
           });
       } else if (functionName == "createSlackChannel") {
-          const tool_result = await createSlackChannel(JSON.parse(functionParams));
+          const tool_result = await mcpClient.createSlackChannel(JSON.parse(functionParams));
           messages.push({
             tool_call_id: tool.id,
             role: "tool",
@@ -191,7 +211,7 @@ export async function generate(userMessage, threadId) {
             content: tool_result,
           });
       } else if (functionName == "listSlackChannels") {
-          const tool_result = await listSlackChannels();
+          const tool_result = await mcpClient.listSlackChannels();
           messages.push({
             tool_call_id: tool.id,
             role: "tool",
@@ -199,7 +219,7 @@ export async function generate(userMessage, threadId) {
             content: tool_result,
           });
       } else if (functionName == "sendMessageToUser") {
-          const tool_result = await sendMessageToUser(JSON.parse(functionParams));
+          const tool_result = await mcpClient.sendMessageToUser(JSON.parse(functionParams));
           messages.push({
             tool_call_id: tool.id,
             role: "tool",
@@ -207,7 +227,7 @@ export async function generate(userMessage, threadId) {
             content: tool_result,
           });
       } else if (functionName == "sendMessageToChannel") {
-          const tool_result = await sendMessageToChannel(JSON.parse(functionParams));
+          const tool_result = await mcpClient.sendMessageToChannel(JSON.parse(functionParams));
           messages.push({
             tool_call_id: tool.id,
             role: "tool",
@@ -225,87 +245,4 @@ async function webSearch({ query }) {
   const finalResult = response.results.map(result => result.content).join("\n\n");
 
   return finalResult
-}
-
-async function createSlackChannel({ channelName, isPrivate = false }) {
-  try {
-    // Initialize Slack client
-    const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
-    
-    // Create the channel
-    const result = await slackClient.conversations.create({
-      name: channelName,
-      is_private: isPrivate
-    });
-    console.log(`Channel created: ${result.channel.name}`);
-    
-    return JSON.stringify(result.channel);
-  } catch (error) {
-    console.error(`Error creating channel: ${error}`);
-    return `Sorry, I encountered an error creating the channel. Please make sure the channel name is valid and I have the necessary permissions.`;
-  }
-}
-
-async function listSlackChannels() {
-  try {
-    // Initialize Slack client
-    const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
-    
-    // Fetch all channels
-    const result = await slackClient.conversations.list({
-      exclude_archived: true
-    });
-    
-    return JSON.stringify(result.channels)
-  } catch (error) {
-    console.error(`Error listing channels: ${error}`);
-    return `Sorry, I encountered an error fetching the channels. Please make sure I have the necessary permissions.`;
-  }
-}
-
-async function sendMessageToUser({ userId, message }) {
-  try {
-    // Initialize Slack client
-    const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
-    
-    // Send direct message to user
-    const result = await slackClient.chat.postMessage({
-      channel: userId,
-      text: message
-    });
-    
-    return JSON.stringify(result);
-  } catch (error) {
-    console.error(`Error sending message to user: ${error}`);
-    return `Sorry, I encountered an error sending the message to the user. Please make sure I have the necessary permissions.`;
-  }
-}
-
-async function sendMessageToChannel({ channelName, message }) {
-  try {
-    // Initialize Slack client
-    const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
-    
-    // Find the channel by name
-    const channelList = await slackClient.conversations.list({
-      exclude_archived: true
-    });
-    
-    const channel = channelList.channels.find(c => c.name === channelName);
-    
-    if (!channel) {
-      return `Channel #${channelName} not found.`;
-    }
-    
-    // Send message to channel
-    const result = await slackClient.chat.postMessage({
-      channel: channel.id,
-      text: message
-    });
-    
-    return JSON.stringify(result);
-  } catch (error) {
-    console.error(`Error sending message to channel: ${error}`);
-    return `Sorry, I encountered an error sending the message to the channel. Please make sure I have the necessary permissions.`;
-  }
 }

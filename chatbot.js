@@ -2,7 +2,7 @@ import Groq from "groq-sdk";
 import 'dotenv/config';
 import { tavily } from "@tavily/core";
 import NodeCache from "node-cache";
-import { json } from "express";
+import { WebClient } from "@slack/web-api";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
@@ -17,10 +17,14 @@ export async function generate(userMessage, threadId) {
         content: `You are a smart personal assistant.
           If you know the answer to a question, answer it directly in plain English.
           If the answer requires real-time, local, or up-to-date information, or if you don't know the answer, use the available tools to find it.
-          You have access to the following tool:
+          You have access to the following tools:
           webSearch(query: string): Use this to search the internet for current or unknown information.
-          Decide when to use your own knowledge and when to use the tool.
-          DO not mention the tool unless needed.
+          createSlackChannel(channelName: string, isPrivate: boolean): Create a new Slack channel with the given name. Set isPrivate to true for private channels.
+          listSlackChannels(): List all channels in the Slack workspace.
+          sendMessageToUser(userId: string, message: string): Send a direct message to a user.
+          sendMessageToChannel(channelName: string, message: string): Send a message to a channel.
+          Decide when to use your own knowledge and when to use the tools.
+          DO not mention the tools unless needed.
 
           Example:
           Q: What is the capital of France?
@@ -76,6 +80,80 @@ export async function generate(userMessage, threadId) {
               required: ["query"]
             }
           }
+        },
+        {
+          type: "function",
+          function: {
+            name: "createSlackChannel",
+            description: "Create a new Slack channel with the given name.",
+            parameters: {
+              type: "object",
+              properties: {
+                channelName: {
+                  type: "string",
+                  description: "The name of the channel to create.",
+                },
+                isPrivate: {
+                  type: "boolean",
+                  description: "Whether the channel should be private (true) or public (false).",
+                },
+              },
+              required: ["channelName"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "listSlackChannels",
+            description: "List all channels in the Slack workspace.",
+            parameters: {
+              type: "object",
+              properties: {},
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "sendMessageToUser",
+            description: "Send a direct message to a user.",
+            parameters: {
+              type: "object",
+              properties: {
+                userId: {
+                  type: "string",
+                  description: "The ID of the user to send the message to.",
+                },
+                message: {
+                  type: "string",
+                  description: "The message to send to the user.",
+                },
+              },
+              required: ["userId", "message"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "sendMessageToChannel",
+            description: "Send a message to a channel.",
+            parameters: {
+              type: "object",
+              properties: {
+                channelName: {
+                  type: "string",
+                  description: "The name of the channel to send the message to.",
+                },
+                message: {
+                  type: "string",
+                  description: "The message to send to the channel.",
+                },
+              },
+              required: ["channelName", "message"]
+            }
+          }
         }
       ],
       tool_choice: "auto",
@@ -104,6 +182,38 @@ export async function generate(userMessage, threadId) {
             name: functionName,
             content: tool_result,
           });
+      } else if (functionName == "createSlackChannel") {
+          const tool_result = await createSlackChannel(JSON.parse(functionParams));
+          messages.push({
+            tool_call_id: tool.id,
+            role: "tool",
+            name: functionName,
+            content: tool_result,
+          });
+      } else if (functionName == "listSlackChannels") {
+          const tool_result = await listSlackChannels();
+          messages.push({
+            tool_call_id: tool.id,
+            role: "tool",
+            name: functionName,
+            content: tool_result,
+          });
+      } else if (functionName == "sendMessageToUser") {
+          const tool_result = await sendMessageToUser(JSON.parse(functionParams));
+          messages.push({
+            tool_call_id: tool.id,
+            role: "tool",
+            name: functionName,
+            content: tool_result,
+          });
+      } else if (functionName == "sendMessageToChannel") {
+          const tool_result = await sendMessageToChannel(JSON.parse(functionParams));
+          messages.push({
+            tool_call_id: tool.id,
+            role: "tool",
+            name: functionName,
+            content: tool_result,
+          });
       }
   }
   }
@@ -115,4 +225,87 @@ async function webSearch({ query }) {
   const finalResult = response.results.map(result => result.content).join("\n\n");
 
   return finalResult
+}
+
+async function createSlackChannel({ channelName, isPrivate = false }) {
+  try {
+    // Initialize Slack client
+    const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
+    
+    // Create the channel
+    const result = await slackClient.conversations.create({
+      name: channelName,
+      is_private: isPrivate
+    });
+    console.log(`Channel created: ${result.channel.name}`);
+    
+    return JSON.stringify(result.channel);
+  } catch (error) {
+    console.error(`Error creating channel: ${error}`);
+    return `Sorry, I encountered an error creating the channel. Please make sure the channel name is valid and I have the necessary permissions.`;
+  }
+}
+
+async function listSlackChannels() {
+  try {
+    // Initialize Slack client
+    const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
+    
+    // Fetch all channels
+    const result = await slackClient.conversations.list({
+      exclude_archived: true
+    });
+    
+    return JSON.stringify(result.channels)
+  } catch (error) {
+    console.error(`Error listing channels: ${error}`);
+    return `Sorry, I encountered an error fetching the channels. Please make sure I have the necessary permissions.`;
+  }
+}
+
+async function sendMessageToUser({ userId, message }) {
+  try {
+    // Initialize Slack client
+    const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
+    
+    // Send direct message to user
+    const result = await slackClient.chat.postMessage({
+      channel: userId,
+      text: message
+    });
+    
+    return JSON.stringify(result);
+  } catch (error) {
+    console.error(`Error sending message to user: ${error}`);
+    return `Sorry, I encountered an error sending the message to the user. Please make sure I have the necessary permissions.`;
+  }
+}
+
+async function sendMessageToChannel({ channelName, message }) {
+  try {
+    // Initialize Slack client
+    const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
+    
+    // Find the channel by name
+    const channelList = await slackClient.conversations.list({
+      exclude_archived: true
+    });
+    
+    const channel = channelList.channels.find(c => c.name === channelName);
+    
+    if (!channel) {
+      return `Channel #${channelName} not found.`;
+    }
+    
+    // Send message to channel
+    const result = await slackClient.chat.postMessage({
+      channel: channel.id,
+      text: message
+    });
+    
+    return JSON.stringify(result);
+  } catch (error) {
+    console.error(`Error sending message to channel: ${error}`);
+    return `Sorry, I encountered an error sending the message to the channel. Please make sure I have the necessary permissions.`;
+  }
 }
